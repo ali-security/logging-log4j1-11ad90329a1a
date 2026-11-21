@@ -62,6 +62,17 @@ public class ErrorHandlerTestCase extends TestCase {
     root.getLoggerRepository().resetConfiguration();
   }
 
+  /**
+   * Run test1 before test2 (declaration order). test2 reads output/temp left by
+   * test1; JDK 7+ returns reflected methods in no fixed order.
+   */
+  public static junit.framework.Test suite() {
+    junit.framework.TestSuite suite = new junit.framework.TestSuite();
+    suite.addTest(new ErrorHandlerTestCase("test1"));
+    suite.addTest(new ErrorHandlerTestCase("test2"));
+    return suite;
+  }
+
   public void test1() throws Exception {
     DOMConfigurator.configure("input/xml/fallback1.xml");
     Appender primary = root.getAppender("PRIMARY");

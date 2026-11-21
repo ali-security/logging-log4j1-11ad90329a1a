@@ -1,0 +1,60 @@
+name: seal-build
+
+# Upstream log4j 1.2 has no GitHub Actions CI. This workflow reproduces the
+# project's own Maven build (`mvn package`, per INSTALL), whose test phase runs
+# the Ant suite tests/build.xml target `runAll` through maven-antrun-plugin.
+# Built on a JDK 7 + Maven 3 image: javac target is 1.4 (maven-compiler-plugin
+# config), and the public jar was built with JDK 1.6.
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "tests/build.xml target to run instead of runAll (e.g. Core); empty runs the full suite"
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test (Maven 3, OpenJDK 7)
+        env:
+          TESTS_TARGET: ${{ inputs.test-filter || 'runAll' }}
+        run: |
+          set -o pipefail
+          docker run --rm --platform linux/amd64 \
+            -e MAVEN_OPTS="-Dhttps.protocols=TLSv1.2" \
+            -v "$PWD":/workdir -w /workdir \
+            maven:3-jdk-7 \
+            mvn -B clean verify -Dmaven.site.skip=true -Dtests.target="$TESTS_TARGET" 2>&1 | tee build.log
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "Per-suite JUnit results (tests/build.xml via maven-antrun-plugin):"
+          awk '/\[junit\] (Testsuite|Tests run):/' build.log
+          # Ant prints "Tests run:" twice per suite (printsummary + plain formatter);
+          # count only the formatter's line, the one right after "Testsuite:".
+          awk '/\[junit\] Testsuite:/ { insuite = 1; next }
+               insuite && /\[junit\] Tests run:/ {
+                 insuite = 0;
+                 gsub(",", "");
+                 for (i = 1; i <= NF; i++) {
+                   if ($i == "run:") run += $(i+1);
+                   if ($i == "Failures:") fail += $(i+1);
+                   if ($i == "Errors:") err += $(i+1);
+                 }
+                 suites++
+               }
+               END { printf "TOTAL: %d suites, %d tests run, %d passed, %d failures, %d errors\n", suites, run, run - fail - err, fail, err }' build.log
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: log4j-jar
+          path: target/log4j-1.2.17.jar
+          if-no-files-found: error
